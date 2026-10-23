@@ -59,7 +59,20 @@ def extract_text(filename: str, data: bytes) -> str:
         reader = PdfReader(__import__("io").BytesIO(data))
         pages = []
         for i, page in enumerate(reader.pages):
-            pages.append(f"[page {i + 1}] " + (page.get_text() or ""))
+            # pypdf >= 1.x uses extract_text(); some forks expose get_text()
+            text = ""
+            for meth in ("extract_text", "get_text"):
+                try:
+                    text = getattr(page, meth)() or ""
+                    break
+                except Exception:
+                    continue
+            if not text and hasattr(page, "get_contents"):
+                try:
+                    text = (page.get_contents() or "").decode("utf-8", errors="replace")
+                except Exception:
+                    text = ""
+            pages.append(f"[page {i + 1}] " + text)
         return "\n".join(pages)
     return data.decode("utf-8", errors="replace")
 
