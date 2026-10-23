@@ -1,0 +1,25 @@
+[page 1] ACME Retail Support Policy — Version 4.2
+
+Refund Policy
+Customers may request a full refund within 30 days of purchase. Partial refunds are issued for opened items at 50% of the price. Refunds are processed within 3 business days and credited to the original payment method. Refunds for digital products are not available after download.
+
+Shipping
+Standard shipping takes 5-7 business days within India. Express shipping is 2-3 business days for an additional fee of Rs 150. Free shipping applies to orders above Rs 1000. International shipping takes 10-14 business days.
+
+Returns for Damaged Items
+Damaged items must be reported within 48 hours of delivery. Return is immediate and a replacement is shipped within 2 business days. Photographs of the damage are required for the claim.
+
+Payment Methods
+We accept UPI, credit cards, debit cards, and net banking. EMI options are available on orders above Rs 5000.
+
+Contact and Support
+Support email: support@acmeretail.example. Live chat is available from 9 to 6, Monday to Friday. Office hours are 9 to 6 IST. Our headquarters is located in Pune, Maharashtra.
+
+Password and Account
+To reset your password, click "Forgot Password" on the login page and follow the emailed link. Link expires in 24 hours. Account deletion requests are processed in 7 days.
+
+Warranty
+All electronics carry a 1 year manufacturer warranty. Warranty claims require the invoice number. Extended warranty of 2 years is available for Rs 499.
+
+[page 2] Escalation and Refund Disputes
+If a refund is not processed within 3 business days, escalate to the supervisor queue via support ticket with the order ID. Disputes above Rs 10000 are reviewed by the finance team within 5 business days. Chargeback claims must include bank statement references.
