@@ -32,13 +32,22 @@ python3 eval/eval.py   # prints hit@5
 1. Upload the sample support policy PDF
 2. Ask "What is the refund window?" → answer with citation chips (page + score)
 3. Ask a nonsense question ("What is your blueberry policy?") → bot says "not in documents, escalate" (anti-hallucination)
-4. Show eval hit@5 = 0.70 number
+4. Show eval hit@5 = 1.00 number
 
-## Next upgrades (in ROI order)
-1. Real embeddings via Ollama embed endpoint or OpenAI embeddings (replaces TF-IDF)
-2. Cross-encoder reranker (BGE-reranker local or voyageai)
-3. PDF.js in-browser citation preview (Kotaemon-style)
-4. Deploy: Render/Oracle free tier + Caddy
+## Promo
+`promo/launch-teaser.mp4` — 640KB launch teaser for social posts.
+
+## Stress testing (real-world dirty docs, not toy corpora)
+- `eval/stress_test.py` — 32 adversarial probes across multi-invoice PDFs, flattened tables, contradictory policy versions, entity traps, prompt injection, off-topic abstention, live-state questions. Result: **32/32**.
+- Corpus: `acme_vendor_bundle.pdf` (18 pages: two invoices, SLA matrix, catalog, versioned policies, two-column FAQ, garbled OCR amounts, a buried injection memo) + `dirty_warranty_invoice.pdf` (soft-hyphen number corruption, repeated footers, decoy GSTINs).
+- Full findings: `STRESS_REPORT.md`.
+- Why it matters: every probe maps to a documented industry failure mode (OWASP prompt injection, Air Canada stale-policy liability, table-extraction accuracy). This is the part competitors get wrong.
+
+## Remaining upgrades (genuinely not built yet)
+1. OCR/vision layer for image-only scanned PDFs (text-layer PDFs only today)
+2. PDF.js in-browser citation preview (Kotaemon-style)
+3. Deploy: Render/Oracle free tier + Caddy
+4. Mirror the deterministic router into the HF Space static demo (backend is ahead of the demo)
 
 ## Notes
 - If ChromaDB import fails on your env, the index auto-falls back to TF-IDF+BM25 hybrid — retrieval still works.
