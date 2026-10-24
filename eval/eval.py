@@ -20,6 +20,11 @@ GOLDEN_SET = [
     ("How do I reset my password?", "reset"),
     ("What are the office hours?", "9 to 6"),
     ("Is there a warranty on electronics?", "1 year"),
+    # invoice/table probes — added with the table-aware chunker
+    ("What is the grand total of the invoice?", "3,93,160.00"),
+    ("What is the GSTIN of the seller on the invoice?", "19AACCV5709J1ZZ"),
+    ("How much IGST was charged on the invoice?", "59,973.59"),
+    ("Which GPU was purchased in the invoice?", "RTX 5080"),
 ]
 
 

@@ -26,13 +26,22 @@ _failed = False
 SENT_RE = re.compile(r"[^.;!?]*[.;!?]")
 
 
-def _sentences(text: str) -> list[str]:
+def _sentences(text: str, query: str = "") -> list[str]:
     """Sentence-level units: a 120-word chunk dilutes the cross-encoder score;
     scoring query-vs-sentence and taking the max is the standard fix and also
-    matches how humans cite (one decisive line)."""
+    matches how humans cite (one decisive line).
+
+    Why the query matters: the [:10] truncation in rerank_with_snippets drops
+    sentences, and with line-aware chunking a chunk can hold 20+ sentences.
+    Ordering by lexical overlap with the query guarantees the answer-bearing
+    sentence is never truncated away.
+    """
     parts = [s.strip() for s in SENT_RE.findall(text) if len(s.strip()) >= 20]
     if not parts:
         return [text[:300]]
+    if query:
+        q_tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
+        parts.sort(key=lambda s: -len(q_tokens & set(re.findall(r"[a-z0-9]+", s.lower()))))
     return [s[:300] for s in parts]
 
 

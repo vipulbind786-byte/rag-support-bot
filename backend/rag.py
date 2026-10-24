@@ -111,14 +111,72 @@ def extract_text(filename: str, data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+TOTAL_ROW_RE = re.compile(
+    r"\b(Add\s*:|Less\s*:|Grand\s+Total|Sub\s*-?\s*Total|Total\s+Amount)\b", re.I
+)
+
+
 def chunk_text(text: str, chunk_size=120, overlap=20) -> list[str]:
-    words = text.split()
-    chunks = []
+    """Line-aware sliding-window chunking.
+
+    Why: word-window chunking (the old approach) cut invoice/ledger rows in
+    half, so a chunk could end with "Grand Total 11.00 Units" and the amount
+    lived in the next chunk — a small model then quotes "11.00 Units" as the
+    total. Boundaries now never split a line, and a contiguous run of
+    Add/Less/Grand Total lines is kept as one indivisible unit.
+    """
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not lines:
+        return [text] if text.strip() else []
+
+    # 1. group lines into units: totals blocks are atomic, others fill ~chunk_size
+    units: list[str] = []
     i = 0
-    while i < len(words):
-        chunks.append(" ".join(words[i:i + chunk_size]))
-        i += chunk_size - overlap
+    while i < len(lines):
+        if TOTAL_ROW_RE.search(lines[i]):
+            block = []
+            while i < len(lines) and TOTAL_ROW_RE.search(lines[i]):
+                block.append(lines[i])
+                i += 1
+            units.append("\n".join(block))
+            continue
+        cur, w = [], 0
+        while i < len(lines) and w < chunk_size:
+            cur.append(lines[i])
+            w += len(lines[i].split())
+            i += 1
+        units.append("\n".join(cur))
+
+    # 2. carry an overlap tail from the previous unit (whole lines only)
+    chunks = []
+    for k, unit in enumerate(units):
+        if k > 0 and overlap:
+            tail_lines = units[k - 1].split("\n")[-1].split()
+            tail = " ".join(tail_lines[-overlap:])
+            chunks.append(f"{tail}\n{unit}" if tail else unit)
+        else:
+            chunks.append(unit)
     return chunks or [text]
+
+
+def normalize_invoice_totals(text: str) -> str:
+    """Deterministic numeric normalization for invoice-like documents.
+
+    Appends one grounded line per Grand Total line so the answer layer can cite
+    the amount without parsing "11.00 Units". The amount is the LAST rupee-format
+    number on that line — nothing is invented or computed.
+    """
+    if not re.search(r"GSTIN|Invoice No", text, re.I):
+        return text
+
+    def fix_line(m):
+        line = m.group(0)
+        amounts = re.findall(r"\d[\d,]*\.\d{2}", line)
+        if not amounts:
+            return line
+        return f"{line}\n[normalized] Grand Total amount: ` {amounts[-1]}"
+
+    return re.sub(r".*Grand\s+Total.*", fix_line, text)
 
 
 class RAGIndex:
@@ -200,6 +258,7 @@ class RAGIndex:
         if any(d["id"] == doc_id for d in self.documents):
             return doc_id  # already indexed
         text = extract_text(filename, data)
+        text = normalize_invoice_totals(text)
         new_chunks = chunk_text(text)
         start = len(self.chunks)
         for chunk in new_chunks:
@@ -327,13 +386,9 @@ class RAGIndex:
         # cross-encoder tells us HOW relevant each one actually is to THIS query.
         # Order candidates by reranker score, and drop anything below the floor.
         rerank_scores = None
-        best_sentence = {}
         try:
-            from reranker import rerank_with_snippets
-            scored = rerank_with_snippets(query, [self.chunks[i]["text"] for i in relevant])
-            if scored is not None:
-                rerank_scores = [s for s, _ in scored]
-                best_sentence = {i: sent for i, (s, sent) in zip(relevant, scored) if sent}
+            from reranker import rerank
+            rerank_scores = rerank(query, [self.chunks[i]["text"] for i in relevant])
         except Exception as e:
             print(f"[warn] reranker import failed: {e}")
         if rerank_scores is not None:
@@ -351,26 +406,11 @@ class RAGIndex:
         hits = []
         for idx in ordered[:top_k]:
             c = self.chunks[idx]
-            # snippet: full chunk text (capped), but anchored on the sentence the
-            # reranker actually scored as the best match — that sentence IS the
-            # proof, so it must be visible in the citation, not buried past the
-            # 600-char cut. Falls back to rarest-query-term anchoring if the
-            # reranker is unavailable.
-            text = c["text"]
-            anchor = best_sentence.get(idx) or ""
-            if len(text) > 600:
-                lower = text.lower()
-                pos = lower.find(anchor.lower()[:60]) if anchor else -1
-                if pos < 0:
-                    cands = [t for t in content_terms(query) if _stem(t) in lower]
-                    if cands:
-                        term = min(cands, key=lambda t: sum(_stem(t) in c2["text"].lower() for c2 in self.chunks))
-                        pos = lower.find(term)
-                    else:
-                        terms = [t for t in TOKEN_RE.findall(query.lower()) if t in lower]
-                        pos = lower.find(terms[0]) if terms else 0
-                start = max(0, pos - 250)
-                text = text[start:start + 600]
+            # snippet: with line-aware chunking a chunk IS a coherent block
+            # (rows/totals never split), so show it in full — the old 600-char
+            # cut could hide the answer line from the citation while the chunk
+            # still ranked high. Cap stays only as a guard for huge blocks.
+            text = c["text"][:1200]
             hit = {
                 "text": text,
                 "source": c["source"],
