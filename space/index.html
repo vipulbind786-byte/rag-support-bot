@@ -37,7 +37,7 @@ code{background:#0d1522;padding:2px 5px;border-radius:4px}
 <main>
   <div class="panel">
     <div class="chips">
-      <span class="chip">120-word chunks, 20-word overlap</span>
+      <span class="chip">line-aware chunks (invoice rows never split), 20-line overlap tail</span>
       <span class="chip">BM25 exact match</span>
       <span class="chip">TF-IDF distinctive terms</span>
       <span class="chip">RRF voting fusion</span>
@@ -114,13 +114,51 @@ function stem(w){for(const s of ["ing","ed","es","s"])if(w.endsWith(s)&&w.length
 function contentTerms(t){return new Set(tokens(t).filter(w=>!STOP.has(w)&&w.length>2).map(stem));}
 
 function chunkify(name,text){
-  const words=text.split(/\s+/).filter(Boolean);
-  const out=[], size=120, step=size-20;
-  for(let i=0;i<words.length;i+=step) out.push({source:name, text:words.slice(i,i+size).join(" ")});
-  return out;
+  // Line-aware chunking — mirrors backend/rag.py.chunk_text.
+  // Word-window chunking cut invoice rows in half, so a chunk could end with
+  // "Grand Total: 3,93,160.00" missing its amount or split a row's qty/price.
+  // Boundaries now never fall mid-line, and Add/Less/Grand Total runs are atomic.
+  const lines=text.split(/\n/).map(l=>l.trim()).filter(Boolean);
+  if(!lines.length) return text.trim()?[{source:name,text}]:[];
+  const SIZE=120,OVERLAP=20;
+  const TOTAL_RE=/(Add\s*:|Less\s*:|Grand\s+Total|Sub\s*-?\s*Total|Total\s+Amount)/i;
+  const units=[];
+  let i=0;
+  while(i<lines.length){
+    if(TOTAL_RE.test(lines[i])){
+      const block=[];
+      while(i<lines.length&&TOTAL_RE.test(lines[i])){block.push(lines[i]);i++;}
+      units.push(block.join("\n"));
+      continue;
+    }
+    const cur=[]; let w=0;
+    while(i<lines.length&&w<SIZE){cur.push(lines[i]);w+=lines[i].split(/\s+/).length;i++;}
+    units.push(cur.join("\n"));
+  }
+  const out=[];
+  for(let k=0;k<units.length;k++){
+    let chunk=units[k];
+    if(k>0&&OVERLAP){
+      const tail=units[k-1].split("\n").pop().split(/\s+/).slice(-OVERLAP).join(" ");
+      if(tail) chunk=tail+"\n"+chunk;
+    }
+    out.push({source:name,text:chunk});
+  }
+  return out.length?out:[{source:name,text}];
+}
+
+function normalizeTotals(text){
+  // Deterministic, extraction-only normalization (mirrors backend normalize_invoice_totals):
+  // every Grand Total line gets an explicit amount line so a reader can cite the
+  // number without parsing neighbouring "Units"/qty columns. Nothing is computed.
+  if(!/GSTIN|Invoice No/i.test(text)) return text;
+  return text.replace(/.*Grand\s+Total.*/g,(line)=>{
+    const amounts=line.match(/\d[\d,]*\.\d{2}/g);
+    return amounts?line+"\n[normalized] Grand Total amount: ₹"+amounts[amounts.length-1]:line;
+  });
 }
 function buildIndex(docs){
-  const chunks=[]; for(const d of docs) chunks.push(...chunkify(d.name,d.text));
+  const chunks=[]; for(const d of docs) chunks.push(...chunkify(d.name,normalizeTotals(d.text)));
   const df=new Map(), N=chunks.length;
   for(const c of chunks){for(const w of new Set(tokens(c.text))) df.set(w,(df.get(w)||0)+1);}
   const avgLen=N?chunks.reduce((s,c)=>s+tokens(c.text).length,0)/N:1;
@@ -226,7 +264,7 @@ document.getElementById("addDoc").onclick=()=>{
   result.innerHTML=`<div class="answer">Indexed <code>${name}</code> → ${idx.chunks.length} total chunks. Ask a question.</div>`;
 };
 document.getElementById("selftest").onclick=()=>{
-  const GOLDEN=[["What is the refund window?","30 days"],["How long does shipping take?","5-7 business days"],["What is the return policy for damaged items?","immediate"],["Where is the company headquarters located?","Pune"],["What payment methods are accepted?","UPI"],["What is the support email address?","support"],["What is the minimum order value for free shipping?","1000"],["How do I reset my password?","reset"],["What are the office hours?","9 to 6"],["Is there a warranty on electronics?","1 year"]];
+  const GOLDEN=[["What is the refund window?","30 days"],["How long does shipping take?","5-7 business days"],["What is the return policy for damaged items?","immediate"],["Where is the company headquarters located?","Pune"],["What payment methods are accepted?","UPI"],["What is the support email address?","support"],["What is the minimum order value for free shipping?","1000"],["How do I reset my password?","reset"],["What are the office hours?","9 to 6"],["Is there a warranty on electronics?","1 year"],["What is the grand total of the invoice?","3,93,160.00"],["What is the GSTIN of the seller on the invoice?","19AACCV5709J1ZZ"],["How much GST was charged on the invoice?","79,938.00"],["Which product has the highest amount on the invoice?","ARCTIC FREEZER"]];
   const rows=[]; let hits=0;
   for(const [q,key] of GOLDEN){
     const r=search(idx,q);
@@ -239,7 +277,7 @@ document.getElementById("selftest").onclick=()=>{
     const ok=r.length===0;
     rows.push(`<tr><td>${q}</td><td>should ABSTAIN</td><td class="${ok?"pass":"fail"}">${ok?"ABSTAIN ✓":"answered ✗"}</td></tr>`);
   }
-  rows.push(`<tr><td><strong>hit@5</strong></td><td>${hits}/10 = ${hits/10}</td><td></td></tr>`);
+  rows.push(`<tr><td><strong>hit@5</strong></td><td>${hits}/${GOLDEN.length} = ${hits/GOLDEN.length}</td><td></td></tr>`);
   document.getElementById("testTable").innerHTML=rows.join("");
 };
 </script>

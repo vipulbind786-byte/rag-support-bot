@@ -7,7 +7,7 @@
 - **Two-stage retrieval:** RRF finds candidates fast, then a **local cross-encoder reranker (BAAI bge-reranker-base, CPU, $0)** orders them by true query-chunk relevance and prunes dead candidates before the LLM sees them. Degrades gracefully to RRF-only if the model is missing.
 - **Citations:** every answer carries source + page + relevance score chips (RRF score + rerank score)
 - **SSE streaming** (`/query/stream`): citations arrive BEFORE the first answer token
-- **Eval harness** (`eval/eval.py`: 10 golden Q&A pairs, prints hit@5 — currently **1.00** on the sample policy)
+- **Eval harness** (`eval/eval.py`: 14 golden Q&A pairs across policy + invoice, prints hit@5 — currently **14/14 = 1.00**)
 - **Anti-hallucination double gate:** corpus-coverage gate + reranker relevance floor (measured: true answers ≥0.065, off-topic probes ≤0.02, floor set at 0.05) → bot abstains and escalates instead of inventing
 - **Security:** optional API-key auth (`RAG_API_KEY` env), per-IP rate limit (30/min), 25MB upload cap
 - **LLM-agnostic:** local Ollama (`qwen2.5:0.5b`) by default, OPENAI_API_KEY if set, else zero-cost extractive fallback (the $0-stack pattern)

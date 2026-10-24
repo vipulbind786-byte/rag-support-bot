@@ -4,6 +4,7 @@ local Ollama/llama.cpp endpoint, else a deterministic extractive answer so the
 demo still works with zero API cost (the $0-stack pattern from RAGDoll).
 """
 import os
+import re
 import json
 import urllib.request
 
@@ -15,25 +16,39 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 SYSTEM = (
     "You are a support assistant. Answer ONLY from the provided context. "
     "If the context does not contain the answer, say so and suggest escalation. "
-    "Cite sources as [source, page]."
+    "Cite sources as [source, page]. "
+    "Keep monetary amounts exactly as written in the context, including the "
+    "currency symbol and Indian digit grouping (e.g. ₹3,93,160.00) — never "
+    "convert or reformat them."
 )
 
 
 def _build_prompt(question: str, hits: list[dict]) -> str:
-    ctx = "\n\n".join(
-        f"[{h['source']}, page {h['page'] or '-'}] {h['text']}" for h in hits
-    ) or "(no documents indexed)"
+    q_tokens = {w for w in re.findall(r"[a-z0-9]+", question.lower()) if len(w) > 2}
+    blocks = []
+    for h in hits:
+        lines = [l.strip() for l in h["text"].splitlines() if l.strip()]
+        # put query-matching lines first so the small model sees the answer
+        # before filler (e.g. product rows ahead of the totals block)
+        matched = [l for l in lines if q_tokens & set(re.findall(r"[a-z0-9]+", l.lower()))]
+        rest = [l for l in lines if l not in matched]
+        blocks.append(f"[{h['source']}, page {h['page'] or '-'}] " + "\n".join(matched + rest))
+    ctx = "\n\n".join(blocks) or "(no documents indexed)"
     return f"Context:\n{ctx}\n\nQuestion: {question}"
 
 
 def _extractive_answer(question: str, hits: list[dict]) -> str:
-    """Zero-cost fallback: return the best retrieved passages with citations."""
+    """Zero-cost fallback: return the query-relevant LINES of the best hits."""
     if not hits:
         return "I could not find an answer in the indexed documents. Please escalate to a human agent."
+    q_tokens = {w for w in re.findall(r"[a-z0-9]+", question.lower()) if len(w) > 2}
     parts = []
     for h in hits[:3]:
         cite = f"{h['source']}" + (f", p.{h['page']}" if h['page'] else "")
-        parts.append(f"- {h['text'][:200]} [{cite}]")
+        lines = [l.strip() for l in h["text"].splitlines() if l.strip()]
+        matched = [l for l in lines if q_tokens & set(re.findall(r"[a-z0-9]+", l.lower()))]
+        snippet = " ".join(matched or lines)[:200]
+        parts.append(f"- {snippet} [{cite}]")
     return "Based on your documents:\n" + "\n".join(parts)
 
 

@@ -174,7 +174,7 @@ def normalize_invoice_totals(text: str) -> str:
         amounts = re.findall(r"\d[\d,]*\.\d{2}", line)
         if not amounts:
             return line
-        return f"{line}\n[normalized] Grand Total amount: ` {amounts[-1]}"
+        return f"{line}\n[normalized] Grand Total amount: ₹{amounts[-1]}"
 
     return re.sub(r".*Grand\s+Total.*", fix_line, text)
 

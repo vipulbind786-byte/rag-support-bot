@@ -24,7 +24,7 @@ def test_invoice():
     assert ok
 
     # invariant 2: the normalized line exists exactly once per Grand Total
-    norm = sum("[normalized] Grand Total amount: ` 3,93,160.00" in c for c in chunks)
+    norm = sum("[normalized] Grand Total amount: ₹3,93,160.00" in c for c in chunks)
     print(f"PASS normalized total present ({norm} chunk(s))" if norm else "FAIL normalized total")
     assert norm >= 1
 
