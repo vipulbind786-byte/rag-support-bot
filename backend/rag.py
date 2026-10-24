@@ -12,6 +12,16 @@ from pypdf import PdfReader
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
 
+# Second-stage cross-encoder reranker (see reranker.py). Optional: the pipeline
+# degrades to RRF-only if the model/dependency is missing.
+RERANK_CANDIDATES = 10          # candidates first stage sends to the reranker
+# bge-reranker scores long 120-word chunks lower than short ones (512-token
+# dilution), so scoring is done per-sentence and the chunk keeps its MAX.
+# Measured on the golden set: true positives score >= 0.065, off-topic probes
+# (blueberry policy, Mars CEO, quantum computing) score <= 0.02 — a 0.05 floor
+# cleanly separates "corpus can answer" from "abstain and escalate".
+RERANK_DEAD_FLOOR = 0.05
+
 STOPWORDS = set("""a an the is are was were what which who how when where why do does did
 can could should would will for with and or but not of in on at to by from about as it its
 my your our their this that these those i you we they me he she him her be been being have
@@ -271,7 +281,7 @@ class RAGIndex:
             self._vector_rank(query, top_k),
             self._tfidf_rank(query, top_k),
             self._bm25_rank(query, top_k),
-        ], top_k)
+        ], RERANK_CANDIDATES)
         # Relevance gate (anti-hallucination): if the query's content terms
         # are less than half present anywhere in the indexed corpus, the corpus
         # has no basis to answer — return zero hits so the answer layer says
@@ -287,10 +297,31 @@ class RAGIndex:
         relevant = [i for i in fused if q_terms & chunk_terms[i]]
         if not relevant:
             return []
+
+        # --- second stage: cross-encoder reranking -------------------------
+        # RRF tells us WHICH chunks are popular across three retrievers; the
+        # cross-encoder tells us HOW relevant each one actually is to THIS query.
+        # Order candidates by reranker score, and drop anything below the floor.
+        rerank_scores = None
+        try:
+            from reranker import rerank as _rerank
+            rerank_scores = _rerank(query, [self.chunks[i]["text"] for i in relevant])
+        except Exception as e:
+            print(f"[warn] reranker import failed: {e}")
+        if rerank_scores is not None:
+            # If NOTHING scores above the dead floor, the corpus can't answer:
+            # abstain rather than let the 0.5b model phrase noise into an answer.
+            if max(rerank_scores) < RERANK_DEAD_FLOOR:
+                return []
+            paired = [(i, s) for i, s in zip(relevant, rerank_scores)
+                      if s >= RERANK_DEAD_FLOOR]
+            paired.sort(key=lambda p: -p[1])
+            ordered = [i for i, _ in paired]
+        else:
+            ordered = relevant
+
         hits = []
-        for idx in fused:
-            if idx not in relevant:
-                continue
+        for idx in ordered[:top_k]:
             c = self.chunks[idx]
             # snippet: full chunk text (capped), but guarantee the sentence
             # containing the best query-term match is included — this is what
@@ -304,10 +335,13 @@ class RAGIndex:
                     text = text[start:start + 600]
                 else:
                     text = text[:600]
-            hits.append({
+            hit = {
                 "text": text,
                 "source": c["source"],
                 "page": c["page"],
                 "score": round(scores[idx], 3),
-            })
+            }
+            if rerank_scores is not None:
+                hit["rerank_score"] = round(rerank_scores[relevant.index(idx)], 4)
+            hits.append(hit)
         return hits

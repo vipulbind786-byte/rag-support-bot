@@ -3,12 +3,14 @@
 **One-liner pitch:** "Your support team answers the same 20 questions every week. I build a bot that answers them from your own documents — with page-number citations and measured hit rates."
 
 ## What's inside (production-grade pattern, not a demo)
-- **Hybrid retrieval:** ChromaDB dense vectors + TF-IDF cosine + BM25 lexical, fused with **Reciprocal Rank Fusion** (fuses ranks, never raw scores) — the exact pattern top RAG freelancers use
-- **Citations:** every answer carries source + page + relevance score chips
+- **Hybrid retrieval:** ChromaDB dense vectors (real Ollama `nomic-embed-text` embeddings) + TF-IDF cosine + BM25 lexical, fused with **Reciprocal Rank Fusion** (fuses ranks, never raw scores) — the exact pattern top RAG freelancers use
+- **Two-stage retrieval:** RRF finds candidates fast, then a **local cross-encoder reranker (BAAI bge-reranker-base, CPU, $0)** orders them by true query-chunk relevance and prunes dead candidates before the LLM sees them. Degrades gracefully to RRF-only if the model is missing.
+- **Citations:** every answer carries source + page + relevance score chips (RRF score + rerank score)
 - **SSE streaming** (`/query/stream`): citations arrive BEFORE the first answer token
-- **Eval harness** (`eval/eval.py`: 10 golden Q&A pairs, prints hit@5 — currently **0.70** on the sample policy)
-- **Security:** optional API-key auth (`RAG_API_KEY` env), per-IP rate limit (30/min), 5MB upload cap
-- **LLM-agnostic:** uses OPENAI_API_KEY if set, else local Ollama/llama.cpp, else zero-cost extractive fallback (the $0-stack pattern)
+- **Eval harness** (`eval/eval.py`: 10 golden Q&A pairs, prints hit@5 — currently **1.00** on the sample policy)
+- **Anti-hallucination double gate:** corpus-coverage gate + reranker relevance floor (measured: true answers ≥0.065, off-topic probes ≤0.02, floor set at 0.05) → bot abstains and escalates instead of inventing
+- **Security:** optional API-key auth (`RAG_API_KEY` env), per-IP rate limit (30/min), 25MB upload cap
+- **LLM-agnostic:** local Ollama (`qwen2.5:0.5b`) by default, OPENAI_API_KEY if set, else zero-cost extractive fallback (the $0-stack pattern)
 
 ## Run
 ```

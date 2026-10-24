@@ -5,3 +5,5 @@ pypdf
 rank_bm25
 chromadb
 numpy
+# optional second-stage reranker; pipeline degrades to RRF-only without it
+sentence-transformers

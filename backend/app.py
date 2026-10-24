@@ -15,7 +15,7 @@ from rag import RAGIndex
 from llm import answer_from_context, answer_stream
 
 API_KEY = os.environ.get("RAG_API_KEY", "")  # set to require auth; empty = open demo
-MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 5_000_000))  # 5 MB cap
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 25_000_000))  # 25 MB cap
 RATE_WINDOW = 60
 RATE_LIMIT = 30  # queries/min per IP
 
