@@ -60,6 +60,16 @@ def rerank(query: str, texts: list[str]) -> list[float] | None:
     sentence scoring handles prose where the answer is one line buried in a
     120-word chunk. Both are batched in a single model.predict call.
     """
+    scored = rerank_with_snippets(query, texts)
+    if scored is None:
+        return None
+    return [s for s, _ in scored]
+
+
+def rerank_with_snippets(query: str, texts: list[str]):
+    """Return (score, best_sentence) per chunk. The best sentence is the
+    answer-bearing line the reranker found — we anchor the citation snippet
+    on it so the proof is always visible to the user."""
     model = _get_model()
     if model is None or not texts:
         return None
@@ -72,10 +82,10 @@ def rerank(query: str, texts: list[str]) -> list[float] | None:
                 pairs.append((query, sent))
                 owner.append(ci)
         scores = model.predict(pairs, batch_size=64)
-        best = [0.0] * len(texts)
-        for ci, s in zip(owner, scores):
-            if s > best[ci]:
-                best[ci] = float(s)
+        best = [(0.0, "")] * len(texts)
+        for ci, pair, s in zip(owner, pairs, scores):
+            if s > best[ci][0]:
+                best[ci] = (float(s), pair[1])
         return best
     except Exception as e:
         print(f"[warn] rerank inference failed: {e}")

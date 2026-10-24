@@ -42,10 +42,28 @@ def content_terms(text: str) -> set[str]:
     return {_stem(t) for t in TOKEN_RE.findall(text.lower())
             if t not in STOPWORDS and len(t) >= 2}
 
-# Real embeddings via Ollama (nomic-embed-text, free, local).
-# Falls back to TF-IDF if the embed endpoint is unreachable.
+# Embedding backend switch (same hybrid pipeline, two engines):
+#   ollama    -> local dev/demo: nomic-embed-text 768-dim via local Ollama
+#   fastembed -> deployments (HF Spaces): ONNX bge-small-en-v1.5, ~50MB, CPU,
+#               no server dependency, faster cold start
+# Falls back to TF-IDF if neither is reachable.
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+EMBED_BACKEND = os.getenv("EMBED_BACKEND", "ollama")  # ollama | fastembed
+
+_fastembed_model = None
+
+
+def fastembed_embed(texts: list[str]) -> list[list[float]] | None:
+    global _fastembed_model
+    try:
+        if _fastembed_model is None:
+            from fastembed import TextEmbedding
+            _fastembed_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        return [list(map(float, v)) for v in _fastembed_model.embed(texts)]
+    except Exception as e:
+        print(f"[warn] fastembed unavailable: {e}")
+        return None
 
 
 def ollama_embed(texts: list[str]) -> list[list[float]] | None:
@@ -62,6 +80,12 @@ def ollama_embed(texts: list[str]) -> list[list[float]] | None:
     except Exception as e:
         print(f"[warn] embed endpoint unavailable: {e}")
         return None
+
+
+def embed(texts: list[str]) -> list[list[float]] | None:
+    if EMBED_BACKEND == "fastembed":
+        return fastembed_embed(texts)
+    return ollama_embed(texts)
 
 
 def extract_text(filename: str, data: bytes) -> str:
@@ -303,9 +327,13 @@ class RAGIndex:
         # cross-encoder tells us HOW relevant each one actually is to THIS query.
         # Order candidates by reranker score, and drop anything below the floor.
         rerank_scores = None
+        best_sentence = {}
         try:
-            from reranker import rerank as _rerank
-            rerank_scores = _rerank(query, [self.chunks[i]["text"] for i in relevant])
+            from reranker import rerank_with_snippets
+            scored = rerank_with_snippets(query, [self.chunks[i]["text"] for i in relevant])
+            if scored is not None:
+                rerank_scores = [s for s, _ in scored]
+                best_sentence = {i: sent for i, (s, sent) in zip(relevant, scored) if sent}
         except Exception as e:
             print(f"[warn] reranker import failed: {e}")
         if rerank_scores is not None:
@@ -323,18 +351,26 @@ class RAGIndex:
         hits = []
         for idx in ordered[:top_k]:
             c = self.chunks[idx]
-            # snippet: full chunk text (capped), but guarantee the sentence
-            # containing the best query-term match is included — this is what
-            # makes citations verifiable and evals honest.
+            # snippet: full chunk text (capped), but anchored on the sentence the
+            # reranker actually scored as the best match — that sentence IS the
+            # proof, so it must be visible in the citation, not buried past the
+            # 600-char cut. Falls back to rarest-query-term anchoring if the
+            # reranker is unavailable.
             text = c["text"]
+            anchor = best_sentence.get(idx) or ""
             if len(text) > 600:
-                terms = [t for t in TOKEN_RE.findall(query.lower()) if t in text.lower()]
-                if terms:
-                    pos = text.lower().find(terms[0])
-                    start = max(0, pos - 250)
-                    text = text[start:start + 600]
-                else:
-                    text = text[:600]
+                lower = text.lower()
+                pos = lower.find(anchor.lower()[:60]) if anchor else -1
+                if pos < 0:
+                    cands = [t for t in content_terms(query) if _stem(t) in lower]
+                    if cands:
+                        term = min(cands, key=lambda t: sum(_stem(t) in c2["text"].lower() for c2 in self.chunks))
+                        pos = lower.find(term)
+                    else:
+                        terms = [t for t in TOKEN_RE.findall(query.lower()) if t in lower]
+                        pos = lower.find(terms[0]) if terms else 0
+                start = max(0, pos - 250)
+                text = text[start:start + 600]
             hit = {
                 "text": text,
                 "source": c["source"],

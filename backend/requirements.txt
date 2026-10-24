@@ -7,3 +7,5 @@ chromadb
 numpy
 # optional second-stage reranker; pipeline degrades to RRF-only without it
 sentence-transformers
+# ONNX embeddings for deploys (fast, no Ollama server needed)
+fastembed
