@@ -47,8 +47,10 @@ python3 eval/eval.py   # prints hit@5
 1. OCR/vision layer for image-only scanned PDFs (text-layer PDFs only today)
 2. PDF.js in-browser citation preview (Kotaemon-style)
 3. Deploy: Render/Oracle free tier + Caddy
-4. Mirror the deterministic router into the HF Space static demo (backend is ahead of the demo)
+
+## Done: HF Space demo mirrors the deterministic router
+`space/pipeline.js` is a JS port of the backend pipeline (ingest repair, per-invoice fact extraction, deterministic numeric/table/policy/entity answers) with the same 32-probe stress suite built into the page — **32/32 in-browser, identical numbers to the backend**.
 
 ## Notes
-- If ChromaDB import fails on your env, the index auto-falls back to TF-IDF+BM25 hybrid — retrieval still works.
-- Local llama-server on 8080 closed connections during testing; set OPENAI_API_KEY or LOCAL_LLM_URL for real LLM answers.
+- If ChromaDB import fails on your env, the index auto-falls back to TF-IDF+BM25 hybrid — retrieval still works. (Verified 25 Oct 2026: ChromaDB works on Python 3.14 — 20 chunks stored with real 768-dim nomic-embed-text vectors; the fallback is only for exotic envs.)
+- LLM phrasing verified end-to-end via Ollama on 11434 (`qwen2.5:0.5b`, temperature pinned to 0 for determinism). llama-server on 8080 closed connections during testing — use Ollama or set OPENAI_API_KEY.

@@ -29,6 +29,14 @@ SYSTEM = (
     "convert or reformat them."
 )
 
+_STOPWORDS = {"the", "and", "for", "with", "what", "does", "is", "are", "how",
+              "you", "your", "about", "from", "that", "this", "have", "has",
+              "will", "shall", "may", "can", "when", "where", "which", "who",
+              "why", "their", "there", "they", "them", "then", "than", "also",
+              "into", "onto", "while", "because", "does", "do", "did", "was",
+              "were", "it", "its", "of", "to", "in", "on", "at", "by", "or",
+              "an", "as", "i", "my", "our", "if", "any", "all", "some"}
+
 # Jailbreak/injection probes that must never reach the LLM as a normal query.
 _INJECTION_RE = re.compile(
     r"system prompt|reveal.*prompt|ignore (all )?(previous|above|prior) instructions|"
@@ -91,6 +99,10 @@ def _llm_call(prompt: str) -> str:
             LOCAL_LLM,
             data=json.dumps({
                 "model": LOCAL_MODEL,
+                # temperature 0: the 0.5B model is nondeterministic at default
+                # temp and occasionally mangles adjacent context lines into a
+                # garbled answer (e.g. "smart plug ... requires the invoice").
+                "temperature": 0,
                 "messages": [{"role": "system", "content": SYSTEM},
                             {"role": "user", "content": prompt}],
                 "max_tokens": 500,
@@ -404,14 +416,21 @@ def _procedural_answer(question: str, hits: list[dict]) -> str | None:
             line = line.strip()
             if not line:
                 continue
-            # Q: ... A: ... style
+            # Q: ... A: ... style. Match only content words (>=3 chars, not
+            # stopwords): stopword overlap like "the" hijacked prose questions
+            # into unrelated FAQ rows (warranty question -> password-reset FAQ).
             m = re.match(r"^Q[:.]?\s+(.+?)\s+A[:.]?\s+(.+)$", line, re.I)
-            if m and any(w in q for w in re.findall(r"\w+", m.group(1))[:4]):
-                return m.group(2).strip()
+            if m:
+                content = [w for w in re.findall(r"\w+", m.group(1))
+                           if len(w) >= 3 and w not in _STOPWORDS][:4]
+                if content and any(w in q for w in content):
+                    return m.group(2).strip()
             # labelled rows produced by rejoin_table_rows ("Priority: P1 Critical | Resolution: 2 hrs")
             if "|" in line and ":" in line:
                 parts = re.split(r"\s*\|\s*", line)
-                if any(w in q for w in parts[0].split(":")[-1].split()[:3]):
+                head = [w for w in parts[0].split(":")[-1].split()
+                        if len(w) >= 3 and w not in _STOPWORDS][:3]
+                if head and any(w in q for w in head):
                     return "; ".join(p.strip() for p in parts)
     return None
 
