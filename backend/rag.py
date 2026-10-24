@@ -395,11 +395,37 @@ class RAGIndex:
             # If NOTHING scores above the dead floor, the corpus can't answer:
             # abstain rather than let the 0.5b model phrase noise into an answer.
             if max(rerank_scores) < RERANK_DEAD_FLOOR:
-                return []
-            paired = [(i, s) for i, s in zip(relevant, rerank_scores)
-                      if s >= RERANK_DEAD_FLOOR]
-            paired.sort(key=lambda p: -p[1])
-            ordered = [i for i, _ in paired]
+                # Exception: cross-encoders score alphanumeric identifiers
+                # (invoice numbers, GSTIN, IRN) poorly even when BM25/TF-IDF
+                # found an exact lexical hit. If the query's rare tokens match
+                # a chunk lexically, fall back to the lexical ranking instead
+                # of abstaining — the coverage gate already vetoed off-topic
+                # queries, so this cannot resurrect a hallucination path.
+                rare = {t for t in q_terms
+                       if sum(1 for ct in chunk_terms if t in ct) <= 2}
+                exact = [i for i in relevant
+                         if any(t in self.chunks[i]["text"].lower() for t in rare)]
+                if not exact:
+                    return []
+                fused_rank = {i: r for r, i in enumerate(fused)}
+                ordered = sorted(exact, key=lambda i: fused_rank[i])
+            else:
+                paired = [(i, s) for i, s in zip(relevant, rerank_scores)
+                          if s >= RERANK_DEAD_FLOOR]
+                # Rescue: cross-encoders score garbled table headers and
+                # alphanumeric identifiers (invoice no, GSTIN, IRN) poorly even
+                # when BM25/TF-IDF found an exact lexical hit. Keep such chunks
+                # demoted below the reranked ones rather than dropping them —
+                # the coverage gate already vetoed genuinely off-topic queries.
+                lexical_top = set()
+                for lst in (self._bm25_rank(query, top_k), self._tfidf_rank(query, top_k)):
+                    for r, i in enumerate(lst[:3]):
+                        if i in set(relevant):
+                            lexical_top.add(i)
+                kept = {i for i, _ in paired}
+                rescued = [i for i in relevant if i in lexical_top and i not in kept]
+                paired.sort(key=lambda p: -p[1])
+                ordered = [i for i, _ in paired] + rescued
         else:
             ordered = relevant
 

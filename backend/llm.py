@@ -32,8 +32,9 @@ def _build_prompt(question: str, hits: list[dict]) -> str:
         # before filler (e.g. product rows ahead of the totals block)
         matched = [l for l in lines if q_tokens & set(re.findall(r"[a-z0-9]+", l.lower()))]
         rest = [l for l in lines if l not in matched]
-        blocks.append(f"[{h['source']}, page {h['page'] or '-'}] " + "\n".join(matched + rest))
-    ctx = "\n\n".join(blocks) or "(no documents indexed)"
+        blocks.append((len(matched), f"[{h['source']}, page {h['page'] or '-'}] " + "\n".join(matched + rest)))
+    blocks.sort(key=lambda b: -b[0])  # most query-relevant block first
+    ctx = "\n\n".join(b for _, b in blocks) or "(no documents indexed)"
     return f"Context:\n{ctx}\n\nQuestion: {question}"
 
 
