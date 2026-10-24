@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline RAG Support Bot — Demo</title>
+<style>
+:root{--bg:#0b1220;--panel:#141d2e;--line:#26334a;--text:#e6edf3;--muted:#8b98ab;--accent:#38bdf8;--ok:#22c55e;--warn:#f59e0b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:18px 22px;border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:17px}
+.sub{color:var(--muted);font-size:12px;margin-top:4px}
+main{max-width:780px;margin:0 auto;padding:18px 22px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+input[type=text],textarea{width:100%;background:#0d1522;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px;font:inherit}
+textarea{min-height:90px}
+button{background:var(--accent);border:0;border-radius:8px;padding:9px 14px;color:#04121e;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.answer{background:#0d1522;border:1px solid var(--line);border-radius:8px;padding:12px;margin-top:8px}
+.cite{font-size:12px;color:var(--muted);border-left:3px solid var(--ok);padding:8px 10px;margin-top:8px;background:#0d1522}
+.cite .meta{font-weight:600;color:var(--text)}
+.gate{border-left-color:var(--warn)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.chip{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+code{background:#0d1522;padding:2px 5px;border-radius:4px}
+.pass{color:var(--ok)} .fail{color:#ef4444}
+</style>
+</head>
+<body>
+<header>
+  <h1>Offline RAG Support Bot — live demo</h1>
+  <div class="sub">Hybrid retrieval running 100% in your browser: chunking → BM25 + TF-IDF → RRF fusion → relevance gate → citations. No server, no API, $0. Production build runs the same pipeline with local embeddings + a cross-encoder reranker on your own machine.</div>
+</header>
+<main>
+  <div class="panel">
+    <div class="chips">
+      <span class="chip">120-word chunks, 20-word overlap</span>
+      <span class="chip">BM25 exact match</span>
+      <span class="chip">TF-IDF distinctive terms</span>
+      <span class="chip">RRF voting fusion</span>
+      <span class="chip">coverage gate → abstain, never guess</span>
+    </div>
+    <label>Ask your support question</label>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input id="q" type="text" placeholder="What is the refund window?" />
+      <button id="ask">Ask</button>
+    </div>
+    <div id="result"></div>
+  </div>
+
+  <div class="panel">
+    <label>Add your own documents (paste text) — the index rebuilds instantly</label>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input id="docname" type="text" placeholder="filename: policy.txt" />
+      <button id="addDoc">Add doc</button>
+    </div>
+    <textarea id="doctext" placeholder="Paste document text here..."></textarea>
+  </div>
+
+  <div class="panel">
+    <button class="ghost" id="selftest">Run self-test (golden eval + off-topic probes)</button>
+    <table id="testTable"></table>
+    <div class="sub">hit@5 = fraction of golden questions whose answer appears in the top-5 cited chunks. Off-topic probes must return zero citations — the bot abstains instead of hallucinating.</div>
+  </div>
+
+  <div class="panel">
+    <div class="sub">Why this matters for a support bot: retrieval is deterministic and auditable (every answer carries the exact sentence + source), the gate makes the bot say "escalate to a human" when the corpus can't answer, and the whole thing runs on a laptop with no cloud — right for hospitals, legal, and finance where data cannot leave the premises.</div>
+  </div>
+</main>
+<script>
+// ---------------- corpus ----------------
+const CORPUS = [
+ {name:"support_policy.txt", text:`Refund Policy
+All refunds are processed within 30 days of purchase. To request a refund, email support and include your order number. Refunds are credited to the original payment method.
+Shipping
+Standard shipping takes 5-7 business days. Express shipping is 2-3 business days for orders placed before 3 PM. Free shipping applies to orders above Rs 1000.
+Returns
+Damaged items must be reported within 48 hours for immediate replacement. Unopened items can be returned within 14 days. Return shipping is prepaid by the customer.
+Company Information
+Our headquarters is located in Pune, Maharashtra. Branch offices are in Mumbai and Bangalore.
+Payment Methods
+We accept UPI, credit cards, debit cards, and net banking. EMI options are available on orders above Rs 5000.
+Contact and Support
+Support email: support@acmeretail.example. Live chat is available from 9 to 6, Monday to Friday. Office hours are 9 to 6 IST.
+Password and Account
+To reset your password, click "Forgot Password" on the login page and follow the emailed link. Link expires in 24 hours. Account deletion requests are processed in 7 days.
+Warranty
+All electronics carry a 1 year manufacturer warranty. Extended warranty is available for Rs 499.`},
+ {name:"invoice_vcspl_03485.txt", text:`TAX INVOICE
+VEDANT COMPUTERS SALES PVT. LTD
+Invoice No: VCSPL-03485-2627-123239
+GSTIN: 19AACCV5709J1ZZ
+Invoice Date: 12 June 2026
+Bill To: Acme Retail Pvt. Ltd, Mumbai
+S.No Description Qty Unit Price Amount
+1 ARCTIC FREEZER III PRO 360 BLACK 50 7,750.00 3,87,500.00
+2 USB-C Docking Station 10 5,660.00 56,600.00
+Subtotal: 4,44,100.00
+GST 18%: 79,938.00
+Less: Rounded Off (-): 0.19
+Grand Total: 3,93,160.00 (Rupees Three Lakh Ninety Three Thousand One Hundred Sixty Only)
+Payment Terms: Net 30 days from invoice date. UPI, IMPS, and NEFT accepted.
+Contact: sales@vedantcomputers.example`},
+];
+
+// ---------------- pipeline (mirrors backend/rag.py) ----------------
+const STOP = new Set(("the a an is are was were be been of in on at to for with and or that this these those it its from by as per has have had will would can could not no yes if then there their you your we our me my he she they them what which how why when where who whom about into over under more most other some any all each such may might should must do does did done also than but so nor yet even just very too here now there under again once both between our their").split(" "));
+const TOKEN_RE = /[A-Za-z0-9]+(?:'[A-Za-z]+)?/g;
+function tokens(t){return (t||"").toLowerCase().match(TOKEN_RE)||[];}
+function stem(w){for(const s of ["ing","ed","es","s"])if(w.endsWith(s)&&w.length>s.length+2){w=w.slice(0,-s.length);break;}if(w.endsWith("e")&&w.length>3)w=w.slice(0,-1);return w;}
+function contentTerms(t){return new Set(tokens(t).filter(w=>!STOP.has(w)&&w.length>2).map(stem));}
+
+function chunkify(name,text){
+  const words=text.split(/\s+/).filter(Boolean);
+  const out=[], size=120, step=size-20;
+  for(let i=0;i<words.length;i+=step) out.push({source:name, text:words.slice(i,i+size).join(" ")});
+  return out;
+}
+function buildIndex(docs){
+  const chunks=[]; for(const d of docs) chunks.push(...chunkify(d.name,d.text));
+  const df=new Map(), N=chunks.length;
+  for(const c of chunks){for(const w of new Set(tokens(c.text))) df.set(w,(df.get(w)||0)+1);}
+  const avgLen=N?chunks.reduce((s,c)=>s+tokens(c.text).length,0)/N:1;
+  return {chunks, df, N, avgLen};
+}
+function bm25Rank(idx,q,k){
+  const K1=1.5,B=0.75,terms=[...new Set(tokens(q))],scores=new Map();
+  idx.chunks.forEach((c,i)=>{
+    const t=tokens(c.text),dl=t.length,f={};
+    for(const w of t) f[w]=(f[w]||0)+1;
+    let s=0;
+    for(const term of terms){
+      const tf=f[term]||0; if(!tf) continue;
+      const df=idx.df.get(term)||1;
+      s+=((idx.N-df+0.5)/df)*tf/(K1*(1-B+B*dl/idx.avgLen)+tf);
+    }
+    if(s>0) scores.set(i,s);
+  });
+  return [...scores.entries()].sort((a,b)=>b[1]-a[1]).slice(0,k).map(([i])=>i);
+}
+function tfidfRank(idx,q,k){
+  const qSet=contentTerms(q);
+  const scores=new Map();
+  idx.chunks.forEach((c,i)=>{
+    const cSet=contentTerms(c.text);
+    if(!cSet.size) return;
+    let dot=0,nq=0,nc=0;
+    for(const w of cSet){
+      if(!qSet.has(w)) continue;
+      const idf=Math.log((idx.N+1)/(idx.df.get(w)||1))+1;
+      dot+=idf*idf; nq+=idf*idf; nc+=idf*idf;
+    }
+    if(dot>0) scores.set(i,dot/Math.sqrt(nq*nc));
+  });
+  return [...scores.entries()].sort((a,b)=>b[1]-a[1]).slice(0,k).map(([i])=>i);
+}
+function rrf(ranks,k){
+  const s=new Map();
+  for(const r of ranks) r.forEach((i,p)=>s.set(i,(s.get(i)||0)+1/(60+p+1)));
+  return [...s.entries()].sort((a,b)=>b[1]-a[1]).slice(0,k).map(([i])=>i);
+}
+function search(idx,q,topK=5){
+  const v=tfidfRank(idx,q,6), b=bm25Rank(idx,q,6);
+  const fused=rrf([v,b],10);
+  const vocab=new Set(); const chunkTerms=[];
+  for(const c of idx.chunks){const s=contentTerms(c.text);chunkTerms.push(s);for(const w of s)vocab.add(w);}
+  const qt=contentTerms(q);
+  if(qt.size && [...qt].filter(w=>vocab.has(w)).length/qt.size<0.5) return [];
+  const relevant=fused.filter(i=>qt.size? [...qt].some(w=>chunkTerms[i].has(w)) : true);
+  if(!relevant.length) return [];
+  // reranker-lite: rank candidates by rarity-weighted query-term coverage.
+  // Terms that are rare in the corpus but present in the chunk are the
+  // discriminative ones — a cheap stand-in for a cross-encoder that still
+  // fixes the "RRF popularity wins over actual relevance" failure mode.
+  const termRarity={};
+  for(const w of qt){
+    const df=idx.chunks.reduce((n,c)=>n+(contentTerms(c.text).has(w)?1:0),0);
+    termRarity[w]=Math.log((idx.N+1)/(df+1))+1;
+  }
+  relevant.sort((a,bz)=>{
+    let sa=0,sb=0;
+    for(const w of qt){ if(chunkTerms[a].has(w))sa+=termRarity[w]; if(chunkTerms[bz].has(w))sb+=termRarity[w]; }
+    return sb-sa;
+  });
+  return relevant.slice(0,topK).map(i=>{
+    const c=idx.chunks[i];
+    let text=c.text;
+    const lower=text.toLowerCase();
+    let pos=-1;
+    for(const sent of (c.text.match(/[^.;!?]*[.;!?]/g)||[])){
+      const s=sent.trim();
+      if(s.length>=20 && qt.size && [...qt].some(w=>s.toLowerCase().includes(w))){pos=lower.indexOf(sent.toLowerCase());break;}
+    }
+    if(pos<0){const ws=[...qt].filter(w=>lower.includes(w));if(ws.length)pos=lower.indexOf(ws[0]);}
+    if(pos<0)pos=0;
+    const start=Math.max(0,pos-250);
+    if(text.length>600)text=text.slice(start,start+600);
+    return {text,source:c.source,page:c.page,score:0};
+  });
+}
+
+// ---------------- UI ----------------
+let idx=buildIndex(CORPUS);
+const result=document.getElementById("result");
+document.getElementById("ask").onclick=()=>{
+  const q=document.getElementById("q").value.trim();
+  if(!q)return;
+  const hits=search(idx,q);
+  if(!hits.length){
+    result.innerHTML=`<div class="answer gate"><strong>I could not find an answer in the indexed documents. Please escalate to a human agent.</strong><div class="sub">The relevance gate found no query terms in the corpus — abstaining beats guessing.</div></div>`;
+    return;
+  }
+  const top=hits[0].text;
+  result.innerHTML=`<div class="answer"><strong>Answer:</strong> ${top.split(/[^.;!?]*[.;!?]/).map(s=>s.trim()).filter(s=>s.length>20 && [...contentTerms(q)].some(w=>s.toLowerCase().includes(w)))[0]||top.slice(0,220)}</div>`+
+    hits.map(h=>`<div class="cite"><span class="meta">${h.source}${h.page?` p.${h.page}`:""}</span> — ${h.text.slice(0,300)}${h.text.length>300?"…":""}</div>`).join("");
+};
+document.getElementById("addDoc").onclick=()=>{
+  const name=document.getElementById("docname").value.trim()||"pasted_doc.txt";
+  const text=document.getElementById("doctext").value.trim();
+  if(!text)return;
+  CORPUS.push({name,text});
+  idx=buildIndex(CORPUS);
+  result.innerHTML=`<div class="answer">Indexed <code>${name}</code> → ${idx.chunks.length} total chunks. Ask a question.</div>`;
+};
+document.getElementById("selftest").onclick=()=>{
+  const GOLDEN=[["What is the refund window?","30 days"],["How long does shipping take?","5-7 business days"],["What is the return policy for damaged items?","immediate"],["Where is the company headquarters located?","Pune"],["What payment methods are accepted?","UPI"],["What is the support email address?","support"],["What is the minimum order value for free shipping?","1000"],["How do I reset my password?","reset"],["What are the office hours?","9 to 6"],["Is there a warranty on electronics?","1 year"]];
+  const rows=[]; let hits=0;
+  for(const [q,key] of GOLDEN){
+    const r=search(idx,q);
+    const ok=r.slice(0,5).some(h=>h.text.toLowerCase().includes(key.toLowerCase()));
+    hits+=ok?1:0;
+    rows.push(`<tr><td>${q}</td><td>${key}</td><td class="${ok?"pass":"fail"}">${ok?"HIT":"MISS"}</td></tr>`);
+  }
+  for(const q of ["What is the blueberry sourcing policy?","Who is the CEO of Mars Incorporated?","Tell me about quantum computing"]){
+    const r=search(idx,q);
+    const ok=r.length===0;
+    rows.push(`<tr><td>${q}</td><td>should ABSTAIN</td><td class="${ok?"pass":"fail"}">${ok?"ABSTAIN ✓":"answered ✗"}</td></tr>`);
+  }
+  rows.push(`<tr><td><strong>hit@5</strong></td><td>${hits}/10 = ${hits/10}</td><td></td></tr>`);
+  document.getElementById("testTable").innerHTML=rows.join("");
+};
+</script>
+</body>
+</html>
