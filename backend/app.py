@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from rag import RAGIndex
-from llm import answer_from_context, answer_stream
+from llm import answer_from_context, answer_stream, deterministic_answer
 
 API_KEY = os.environ.get("RAG_API_KEY", "")  # set to require auth; empty = open demo
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 25_000_000))  # 25 MB cap
@@ -77,7 +77,11 @@ async def query(payload: dict):
     if not q:
         raise HTTPException(400, "question is required")
     hits = index.search(q, top_k=int(payload.get("top_k", 6)))
-    return {"answer": answer_from_context(q, hits), "citations": hits}
+    facts = index.structured_facts()
+    det = deterministic_answer(q, facts)
+    answer = det or answer_from_context(q, hits, facts)
+    return {"answer": answer, "citations": hits,
+            "answered_by": "deterministic" if det else "llm"}
 
 
 @app.post("/query/stream")
@@ -87,10 +91,11 @@ async def query_stream(payload: dict):
     if not q:
         raise HTTPException(400, "question is required")
     hits = index.search(q, top_k=int(payload.get("top_k", 6)))
+    facts = index.structured_facts()
 
     def gen():
         yield f"data: {json.dumps({'type': 'citations', 'citations': hits})}\n\n"
-        for token in answer_stream(q, hits):
+        for token in answer_stream(q, hits, facts):
             yield f"data: {json.dumps({'type': 'token', 'text': token})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
