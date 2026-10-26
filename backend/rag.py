@@ -671,7 +671,8 @@ class RAGIndex:
 
     def _load(self):
         if os.path.exists(self._docs_json):
-            saved = json.load(open(self._docs_json))
+            with open(self._docs_json) as f:
+                saved = json.load(f)
             self.documents = saved["documents"]
             self.chunks = saved["chunks"]
             self.facts = saved.get("facts", {})
