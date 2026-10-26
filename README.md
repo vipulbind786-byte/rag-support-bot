@@ -35,7 +35,7 @@ python3 eval/eval.py   # prints hit@5
 4. Show eval hit@5 = 1.00 number
 
 ## Promo
-`promo/launch-teaser.mp4` — 640KB launch teaser for social posts.
+`promo/launch-teaser-v5.mp4` — 25s, 1920x1080 six-scene launch film (h264 + sound bed). Build spec: `promo/VIDEO_BUILD_SCRIPT.md`.
 
 ## Stress testing (real-world dirty docs, not toy corpora)
 - `eval/stress_test.py` — 32 adversarial probes across multi-invoice PDFs, flattened tables, contradictory policy versions, entity traps, prompt injection, off-topic abstention, live-state questions. Result: **32/32**.
