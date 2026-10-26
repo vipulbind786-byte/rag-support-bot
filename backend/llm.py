@@ -6,6 +6,7 @@ demo still works with zero API cost (the $0-stack pattern from RAGDoll).
 import os
 import re
 import json
+import time
 import urllib.request
 
 LOCAL_LLM = os.environ.get("LOCAL_LLM_URL", "http://localhost:11434/v1/chat/completions")
@@ -109,13 +110,17 @@ def _llm_call(prompt: str) -> str:
             }).encode(),
             headers={"Content-Type": "application/json"},
         )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.load(resp)
-            return data["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(f"[warn] LLM call failed ({e}); using extractive fallback")
-        return ""
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.load(resp)
+                return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            if attempt == 2:
+                print(f"[warn] LLM call failed ({e}); using extractive fallback")
+                return ""
+            time.sleep(2 * (attempt + 1))
+    return ""
 
 
 def _numbers_in(text: str) -> set[str]:

@@ -7,8 +7,16 @@ production pattern from top freelancer builds.
 import os
 import re
 import json
+import time
 import hashlib
 from pypdf import PdfReader
+
+# chromadb's telemetry module tries to import opentelemetry, which fails on
+# Python 3.14 in some environments and takes the whole vector store down with
+# it. Turning telemetry off BEFORE chromadb is imported removes that dependency
+# entirely (no data leaves the machine either — consistent with the offline
+# selling point).
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
 
@@ -68,19 +76,28 @@ def fastembed_embed(texts: list[str]) -> list[list[float]] | None:
 
 
 def ollama_embed(texts: list[str]) -> list[list[float]] | None:
-    """Batch-embed texts via Ollama /api/embed. Returns None on failure."""
-    try:
-        import urllib.request
-        req = urllib.request.Request(
-            OLLAMA_URL + "/api/embed",
-            json.dumps({"model": EMBED_MODEL, "input": texts}).encode(),
-        )
-        req.add_header("Content-Type", "application/json")
-        resp = urllib.request.urlopen(req, timeout=60)
-        return json.load(resp)["embeddings"]
-    except Exception as e:
-        print(f"[warn] embed endpoint unavailable: {e}")
-        return None
+    """Batch-embed texts via Ollama /api/embed. Returns None on failure.
+
+    Retries twice with backoff: Ollama's first call against a cold model can
+    return an EOF while it is still loading weights — a single transient miss
+    should not silently degrade the whole index to BM25-only mode.
+    """
+    for attempt in range(3):
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                OLLAMA_URL + "/api/embed",
+                json.dumps({"model": EMBED_MODEL, "input": texts}).encode(),
+            )
+            req.add_header("Content-Type", "application/json")
+            resp = urllib.request.urlopen(req, timeout=60)
+            return json.load(resp)["embeddings"]
+        except Exception as e:
+            if attempt == 2:
+                print(f"[warn] embed endpoint unavailable: {e}")
+                return None
+            time.sleep(2 * (attempt + 1))
+    return None
 
 
 def embed(texts: list[str]) -> list[list[float]] | None:
@@ -743,9 +760,45 @@ class RAGIndex:
     def list_documents(self):
         return self.documents
 
+    def _ensure_vectors(self) -> bool:
+        """Lazy recovery: if seeding failed at startup (cold embedder), retry
+        once on first query. Self-heals the BM25-only degradation without
+        requiring a re-upload."""
+        if self.vector_ok and self.collection.count() >= len(self.chunks):
+            return True
+        if not self.chunks:
+            return False
+        try:
+            embs = ollama_embed([c["text"] for c in self.chunks])
+            if embs is None:
+                return False
+            try:
+                self.chroma.delete_collection("docs")
+            except Exception:
+                pass
+            self.collection = self.chroma.get_or_create_collection("docs")
+            self.collection.add(
+                ids=[f"chunk_{i}" for i in range(len(self.chunks))],
+                embeddings=embs,
+                metadatas=[{"source": c["source"]} for c in self.chunks],
+            )
+            self.vector_ok = True
+            print("[info] vector store re-seeded successfully")
+            return True
+        except Exception as e:
+            print(f"[warn] vector re-seed failed: {e}")
+            self.vector_ok = False
+            return False
+
     def _vector_rank(self, query: str, k: int) -> list[int]:
-        if not self.vector_ok or not self.chunks:
+        if not self.chunks:
             return []
+        if not self.vector_ok:
+            # only attempt recovery when the embedder is reachable
+            if not ollama_embed(["warmup"]):
+                return []
+            if not self._ensure_vectors():
+                return []
         try:
             emb = ollama_embed([query])
             if emb is None:
