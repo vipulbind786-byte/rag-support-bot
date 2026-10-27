@@ -20,6 +20,11 @@ python3 -m uvicorn app:app --port 8000
 python3 eval/eval.py   # prints hit@5
 ```
 
+## Reranker configuration (reproducible)
+- Default: `RERANKER_MODEL=BAAI/bge-reranker-base` (HF Hub ID; Apache-2.0). sentence-transformers uses the local HF cache if the model is already downloaded, otherwise it downloads ~420MB on first run.
+- Air-gapped/client deployments: pre-download the model once, then set `RERANKER_MODEL=/path/to/local/model/dir` — zero network at runtime.
+- If the model or `sentence-transformers` is missing, the reranker prints an explicit `[warn] reranker unavailable ...; RRF-only ordering` and continues with RRF-only retrieval (relevance floor gate is skipped, so abstention still works via the corpus-coverage gate). The fallback is loud, never silent.
+
 ## API
 - GET /health
 - GET /documents

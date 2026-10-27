@@ -7,3 +7,6 @@ node_modules/
 *.log
 private/
 PROJECT-HANDOFF.md
+/AGENTS.md
+/next.md
+/progress.md

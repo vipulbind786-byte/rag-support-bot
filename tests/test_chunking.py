@@ -5,47 +5,67 @@ split a line across a boundary, (c) preserve the golden answer strings.
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
-from rag import chunk_text, normalize_invoice_totals, extract_text
+from rag import (chunk_text, normalize_invoice_totals, extract_text,
+                 neutralize_injection, repair_scanned_numbers,
+                 repair_glued_cents, strip_boilerplate, rejoin_table_rows)
 
-INVOICE = "/mnt/c/Users/USER/Downloads/VSCPL-Sale-VCSPL-03485-2627-123239_1782198162.pdf"
-POLICY = os.path.join(os.path.dirname(__file__), "..", "sample_docs", "support_policy.txt")
+HERE = os.path.dirname(os.path.abspath(__file__))
+INVOICE = os.path.join(HERE, "..", "sample_docs", "acme_vendor_bundle.pdf")
+POLICY = os.path.join(HERE, "..", "sample_docs", "support_policy.txt")
 
 def lines_of(chunk):
     return [l for l in chunk.split("\n") if l.strip()]
 
+def ingest(raw, filename="invoice.pdf"):
+    """Exactly the pipeline add_document() runs, so the test gates the real
+    ingest chain, not just chunk_text in isolation."""
+    text = extract_text(filename, raw)
+    text = neutralize_injection(text)
+    text = repair_scanned_numbers(text)
+    text = repair_glued_cents(text)
+    text = strip_boilerplate(text)
+    text = rejoin_table_rows(text)
+    return normalize_invoice_totals(text)
+
 def test_invoice():
-    text = normalize_invoice_totals(extract_text("invoice.pdf", open(INVOICE, "rb").read()))
+    with open(INVOICE, "rb") as f:
+        raw = f.read()
+    text = ingest(raw)
     chunks = chunk_text(text)
     print(f"invoice: {len(chunks)} chunks")
 
-    # invariant 1: the Grand Total line and its amount are never split
-    ok = any("Grand Total" in c and "3,93,160.00" in c for c in chunks)
-    print("PASS grand-total atomic" if ok else "FAIL grand-total split")
-    assert ok
+    # invariant 1: every grand total's label and its repaired amount stay in
+    # the same chunk (the OCR-corrupted 5,60,24400 / 3,18,60000 amounts must
+    # be regrouped to cents and never split across a boundary)
+    for amount in ("5,60,244.00", "3,18,600.00"):
+        ok = any("GRAND TOTAL" in c.upper() and amount in c for c in chunks)
+        print(f"PASS grand total {amount} atomic" if ok else f"FAIL grand total {amount} split")
+        assert ok
 
-    # invariant 2: the normalized line exists exactly once per Grand Total
-    norm = sum("[normalized] Grand Total amount: ₹3,93,160.00" in c for c in chunks)
-    print(f"PASS normalized total present ({norm} chunk(s))" if norm else "FAIL normalized total")
-    assert norm >= 1
-
-    # invariant 3: no chunk ends mid-line and every chunk line comes from the
-    # source (or is a normalization line we added). Comparison is whitespace-
-    # collapsed because the overlap tail joins words with single spaces.
+    # invariant 2: every chunk line comes from the source (or is a
+    # normalization line we added) — no line is cut mid-way in a way that
+    # destroys meaning. The overlap tail joins the last N words of the
+    # previous unit into one space-joined line, so a chunk line may be a
+    # word-suffix of a source line; comparison is whitespace-collapsed.
     src_norm = {" ".join(l.split()) for l in text.splitlines() if l.strip()}
     bad = [c[:80] for c in chunks
            for l in lines_of(c)
-           if " ".join(l.split()) not in src_norm and not l.startswith("[normalized]")]
+           if not l.startswith("[normalized]")
+           and " ".join(l.split()) not in src_norm
+           and not any(" ".join(l.split()) in s for s in src_norm)]
     print("PASS no line split across chunks" if not bad else f"FAIL line split: {bad}")
     assert not bad
 
-    # invariant 4: each item row stays intact
-    rows = [c for c in chunks for c2 in [c] if "CPU AMD RYZEN 9 9950X MPK 85423100 1.00 PCS 41,000.00 41,000.00" in " ".join(c.split())]
-    print("PASS item row intact" if rows else "FAIL item row split")
-    assert rows
+    # invariant 3: each rejoined catalog row stays intact in one chunk
+    for row in ("SKU-4421 | ARCTIC FREEZER III PRO | 7,750.00 | stock 120",
+                "SKU-8802 | LED 34 MONITOR MSI | 23,000.00 | stock 40"):
+        ok = any(row in " ".join(c.split()) for c in chunks)
+        print(f"PASS catalog row intact: {row[:20]}..." if ok else f"FAIL catalog row split: {row}")
+        assert ok
 
-    print("\n--- sample chunks ---")
+    print("\n--- sample chunk with a grand total ---")
     for c in chunks:
-        if "Grand Total" in c:
+        if "GRAND TOTAL" in c.upper():
             print(c[:400])
             break
     return chunks

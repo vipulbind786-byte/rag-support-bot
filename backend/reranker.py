@@ -9,15 +9,17 @@ was missing.
 
 Model: BAAI/bge-reranker-base (Apache-2.0, ~420MB, CPU-friendly, local, $0).
 Loaded lazily; if sentence-transformers or the model is missing the pipeline
-gracefully falls back to RRF-only ordering (never crashes).
+falls back to RRF-only ordering with an explicit warning (never crashes,
+never silently changes behavior without printing why).
 """
 import os
 import re
 
-RERANKER_MODEL = os.getenv(
-    "RERANKER_MODEL",
-    "/mnt/v/ai-sandbox/workspace/models/bge-reranker-base",
-)
+# Reproducible default: sentence-transformers resolves the HF Hub model ID
+# from its local cache if already downloaded, or fetches it (Apache-2.0).
+# Point RERANKER_MODEL at a local model directory to guarantee zero network
+# access in air-gapped/client deployments.
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
 RERANKER_TIMEOUT_S = int(os.getenv("RERANKER_TIMEOUT_S", 20))
 
 _model = None
