@@ -1,6 +1,6 @@
 # STRATEGY.md — Offline RAG Support Bot: repo context, marketing, sales
 
-Last updated: 26 Oct 2026. This is the single source of truth for *why* this repo exists and *how* it turns into money. Code is in `backend/`, proof is in `STRESS_REPORT.md`, distribution plan is here + `PUBLISH_PLAN.md` + `LINKEDIN.md`.
+Last updated: 26 Oct 2026. This is the single source of truth for *why* this repo exists and *how* it turns into money. Code is in `backend/`, proof is in `STRESS_REPORT.md`, distribution plan is here + `PUBLISH_PLAN.md` (the LinkedIn networking playbook is kept in a private local folder, not in this repo).
 
 ## 1. What this repo actually is (grounded, no exaggeration)
 
@@ -40,7 +40,7 @@ Not the market (yet): enterprise, big tech, US clients. Solo founder, local trus
 Stage: **proof built, audience zero.** Everything below is sequential.
 
 1. **Launch content (done)** — GitHub repo live, HF Space demo live, 25s teaser (`promo/launch-teaser-v5.mp4`), LinkedIn launch post published 25 Oct.
-2. **Network build (active)** — 8 LinkedIn connection requests/day (see `LINKEDIN.md`). Without reach, content is noise.
+2. **Network build (active)** — 8 LinkedIn connection requests/day (playbook kept private, not in this repo). Without reach, content is noise.
 3. **Real-client pilot (next priority)** — take ONE messy real document set (a friend's GST invoice PDF, a clinic's actual warranty terms), run the stress suite on it. Converts "32/32 on our test corpus" → "worked on a client's actual docs." This is the single highest-ROI unverified claim in the sales story.
 4. **Public proof loop** — every pilot becomes a short case note in the repo + a LinkedIn post. Repo doubles as sales collateral.
 5. **Dev.to article** — "Why your RAG bot should refuse to answer." Dev.to traffic + backlink to repo. Write after 1st pilot so it has a real example.
@@ -84,5 +84,5 @@ Until Gate C, the honest status is "portfolio flagship with synthetic corpus" �
 | Repo | https://github.com/vipulbind786-byte/rag-support-bot | live |
 | Teaser | `promo/launch-teaser-v5.mp4` | final, needs LinkedIn native upload |
 | Publish copy | `PUBLISH_PLAN.md` | X copy ready, X auth pending |
-| Networking playbook | `LINKEDIN.md` | active |
+| Networking playbook | private local folder (not in repo) | active |
 | This strategy | `STRATEGY.md` | source of truth |
