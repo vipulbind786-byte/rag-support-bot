@@ -9,7 +9,7 @@
 - **SSE streaming** (`/query/stream`): citations arrive BEFORE the first answer token
 - **Eval harness** (`eval/eval.py`: 14 golden Q&A pairs across policy + invoice, prints hit@5 — currently **14/14 = 1.00**)
 - **Anti-hallucination double gate:** corpus-coverage gate + reranker relevance floor (measured: true answers ≥0.065, off-topic probes ≤0.02, floor set at 0.05) → bot abstains and escalates instead of inventing
-- **Security:** optional API-key auth (`RAG_API_KEY` env), per-IP rate limit (30/min), 25MB upload cap
+- **Security:** optional API-key auth (`RAG_API_KEY` env) covering every corpus-facing route (`/query`, `/query/stream`, `/documents`, `/documents/upload`, `DELETE /documents`); per-IP rate limit (30/min), 25MB upload cap. `GET /health` and the static UI stay public. When `RAG_API_KEY` is unset the demo is fully open, as before.
 - **LLM-agnostic:** local Ollama (`qwen2.5:0.5b`) by default, OPENAI_API_KEY if set, else zero-cost extractive fallback (the $0-stack pattern)
 
 ## Run
@@ -19,6 +19,14 @@ python3 -m uvicorn app:app --port 8000
 # open http://localhost:8000
 python3 eval/eval.py   # prints hit@5
 ```
+
+## Authentication policy
+- `RAG_API_KEY` empty → open demo, no token needed (the HF Space / zero-cost path).
+- `RAG_API_KEY` set → send `Authorization: Bearer <key>` to `/query`, `/query/stream`, `/documents`, `/documents/upload`, `DELETE /documents`. Missing or wrong token returns `401 {"error": "unauthorized"}` before any handler runs.
+- `GET /health` and the UI stay public so monitoring and the demo page work without a key.
+- The comparison is constant-time (`hmac.compare_digest`); the key is never logged, echoed, or embedded in the frontend — the UI prompts for it on the first `401` and keeps it in `sessionStorage` for the session.
+- Regression test: `python3 tests/test_auth.py` (no server, no LLM, no corpus access).
+- The per-IP rate limit applies to all protected routes, so document uploads and listing share the same 30/min bucket as queries.
 
 ## Reranker configuration (reproducible)
 - Default: `RERANKER_MODEL=BAAI/bge-reranker-base` (HF Hub ID; Apache-2.0). sentence-transformers uses the local HF cache if the model is already downloaded, otherwise it downloads ~420MB on first run.

@@ -5,6 +5,7 @@ FastAPI backend. Run: uvicorn app:app --port 8000
 import os
 import json
 import time
+import hmac
 import hashlib
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
@@ -18,6 +19,20 @@ API_KEY = os.environ.get("RAG_API_KEY", "")  # set to require auth; empty = open
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 25_000_000))  # 25 MB cap
 RATE_WINDOW = 60
 RATE_LIMIT = 30  # queries/min per IP
+
+# Routes that read or mutate the indexed corpus. The UI and /health stay public
+# so the demo page can load and monitoring can probe it; everything corpus-facing
+# is gated when RAG_API_KEY is set. Fail-closed: a protected route without a
+# valid Bearer token is rejected before the handler runs.
+PROTECTED_PREFIXES = ("/query", "/documents")
+
+
+def is_authorized(request) -> bool:
+    """Constant-time Bearer check. Never logs or echoes the key."""
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return False
+    return hmac.compare_digest(header[len("Bearer "):], API_KEY)
 
 app = FastAPI(title="RAG Support Bot", version="1.0.0")
 index = RAGIndex(os.path.join(os.path.dirname(__file__), "data"))
@@ -38,10 +53,10 @@ def check_rate(ip: str) -> bool:
 @app.middleware("http")
 async def auth_and_rate(request, call_next):
     path = request.url.path
-    if path.startswith("/query") and API_KEY:
-        if request.headers.get("Authorization", "") != f"Bearer {API_KEY}":
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-    if path.startswith("/query") and not check_rate(request.client.host):
+    protected = path.startswith(PROTECTED_PREFIXES)
+    if protected and API_KEY and not is_authorized(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if protected and not check_rate(request.client.host):
         return JSONResponse({"error": "rate limit exceeded"}, status_code=429)
     return await call_next(request)
 

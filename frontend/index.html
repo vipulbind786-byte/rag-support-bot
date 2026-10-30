@@ -49,6 +49,28 @@
 <script>
 const chat = document.getElementById('chat');
 
+// Auth: the API key is never embedded in the page. If the server requires it,
+// the first protected call returns 401, we prompt once, and keep it in
+// sessionStorage for the session. No key is written to disk or logged.
+let apiKey = sessionStorage.getItem('rag_api_key') || '';
+
+function authHeaders() {
+  return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+}
+
+async function withAuthRetry(url, options) {
+  const res = await fetch(url, { ...options, headers: { ...authHeaders(), ...(options.headers || {}) } });
+  if (res.status === 401) {
+    const entered = window.prompt('This bot is protected. Enter the API key:');
+    if (entered) {
+      apiKey = entered;
+      sessionStorage.setItem('rag_api_key', apiKey);
+      return fetch(url, { ...options, headers: { ...authHeaders(), ...(options.headers || {}) } });
+    }
+  }
+  return res;
+}
+
 function addMsg(text, isUser) {
   const d = document.createElement('div');
   d.className = 'msg' + (isUser ? ' user' : '');
@@ -75,7 +97,7 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = document.getElementById('file').files[0];
   const fd = new FormData(); fd.append('file', f);
-  const r = await fetch('/documents/upload', { method: 'POST', body: fd });
+  const r = await withAuthRetry('/documents/upload', { method: 'POST', body: fd });
   const j = await r.json();
   document.getElementById('uploadStatus').textContent =
     r.ok ? `Indexed ${j.filename} (${j.chunks} chunks)` : 'Upload failed: ' + (j.error || r.status);
@@ -88,7 +110,7 @@ document.getElementById('askForm').addEventListener('submit', async (e) => {
   addMsg(q, true);
   const msg = addMsg('Thinking…', false);
   try {
-    const res = await fetch('/query/stream', {
+    const res = await withAuthRetry('/query/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: q })
